@@ -1,0 +1,37 @@
+﻿# Visual Studio
+bin/
+obj/
+*.user
+*.suo
+*.pdb
+*.exe
+*.dll
+*.cache
+*.aps
+*.pch
+*.sbr
+*.tlb
+*.tlh
+*.tmp
+*.bak
+*.log
+*.tlog
+*.lastbuildstate
+*.lib
+*.exp
+*.ilk
+*.meta
+
+# Visual Studio 临时
+.vs/
+.idea/
+*.swp
+*.swo
+
+# 系统文件
+Thumbs.db
+.DS_Store
+
+# 数据文件（可按需删除注释）
+# *.mxd
+# *.lyr
