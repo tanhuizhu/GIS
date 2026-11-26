@@ -84,20 +84,18 @@
       <Private>False</Private>
     </Reference>
   </ItemGroup>
-  <ItemGroup>
-    <Compile Include="程序入口.cs"><Link>谭惠株\程序入口.cs</Link></Compile>
-    <Compile Include="地图工具.cs"><Link>谭惠株\地图工具.cs</Link></Compile>
-    <Compile Include="地图画布.cs">
+    <ItemGroup>
+    <Compile Include="谭惠株\程序入口.cs" />
+    <Compile Include="谭惠株\地图工具.cs" />
+    <Compile Include="谭惠株\地图画布.cs">
       <SubType>Component</SubType>
-      <Link>谭惠株\地图画布.cs</Link>
     </Compile>
-    <Compile Include="对话框.cs"><Link>谭惠株\对话框.cs</Link></Compile>
-    <Compile Include="空间分析.cs"><Link>李思琪\空间分析.cs</Link></Compile>
-    <Compile Include="主窗口.分析功能.cs"><Link>李思琪\主窗口.分析功能.cs</Link></Compile>
-    <Compile Include="分析参数窗口.cs"><Link>李思琪\分析参数窗口.cs</Link></Compile>
-    <Compile Include="主窗口.cs">
+    <Compile Include="谭惠株\对话框.cs" />
+    <Compile Include="空间分析.cs" />
+    <Compile Include="主窗口.分析功能.cs" />
+    <Compile Include="分析参数窗口.cs" />
+    <Compile Include="谭惠株\主窗口.cs">
       <SubType>Form</SubType>
-      <Link>谭惠株\主窗口.cs</Link>
     </Compile>
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
