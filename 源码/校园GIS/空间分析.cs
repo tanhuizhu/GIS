@@ -110,6 +110,45 @@ namespace 校园GIS
                 加入几何(要素.ShapeCopy);
             }
             System.Runtime.InteropServices.Marshal.ReleaseComObject(游标);
+
+            // 同一交叉口的不同道路常常没有共用端点，按 2 米把邻近节点补连起来
+            补近距离连接(2.0);
+        }
+
+        /// <summary>把距离很近但没有连边的两个节点补一条边，提高路网连通性。</summary>
+        private void 补近距离连接(double 最大距离)
+        {
+            int 总数 = _节点坐标.Count;
+            if (总数 < 2) return;
+
+            double 最大平方 = 最大距离 * 最大距离;
+
+            for (int i = 0; i < 总数; i++)
+            {
+                for (int j = i + 1; j < 总数; j++)
+                {
+                    double 差X = _节点坐标[i][0] - _节点坐标[j][0];
+                    double 差Y = _节点坐标[i][1] - _节点坐标[j][1];
+                    double 距离平方 = 差X * 差X + 差Y * 差Y;
+
+                    if (距离平方 > 最大平方 || 距离平方 <= 1e-6) continue;
+                    if (已有边(i, j)) continue;
+
+                    double 距离 = Math.Sqrt(距离平方);
+                    _邻接表[i].Add(new 边 { 目标节点 = j, 长度 = 距离 });
+                    _邻接表[j].Add(new 边 { 目标节点 = i, 长度 = 距离 });
+                }
+            }
+        }
+
+        private bool 已有边(int 甲, int 乙)
+        {
+            List<边> 表 = _邻接表[甲];
+            for (int i = 0; i < 表.Count; i++)
+            {
+                if (表[i].目标节点 == 乙) return true;
+            }
+            return false;
         }
 
         private void 加入几何(IGeometry 图形)
@@ -146,12 +185,12 @@ namespace 校园GIS
             }
         }
 
-        /// <summary>以 0.5 米为容差把相邻道路端点合并成同一个节点，保证路网连通。</summary>
+        /// <summary>以 1 米为容差把相邻道路端点合并成同一个节点，保证路网连通。</summary>
         private int 取得节点编号(double x, double y)
         {
-            double 圆整X = Math.Round(x * 2) / 2;
-            double 圆整Y = Math.Round(y * 2) / 2;
-            string 键 = string.Format(CultureInfo.InvariantCulture, "{0:F1},{1:F1}", 圆整X, 圆整Y);
+            double 圆整X = Math.Round(x);
+            double 圆整Y = Math.Round(y);
+            string 键 = string.Format(CultureInfo.InvariantCulture, "{0:F0},{1:F0}", 圆整X, 圆整Y);
 
             int 编号;
             if (_节点索引.TryGetValue(键, out 编号)) return 编号;
@@ -232,7 +271,8 @@ namespace 校园GIS
             }
 
             // 终点所在道路与起点不连通时，退而求其次：接到离终点最近的可达节点，
-            // 这样即使道路数据有断点，也能给出可视化路线，避免直接失败。
+            // 再用一段直线连到真实终点，保证路线画到目的地。
+            bool 用了替代终点 = false;
             if (距离[终点编号] == double.MaxValue)
             {
                 int 替代节点 = -1;
@@ -252,6 +292,7 @@ namespace 校园GIS
                 }
                 if (替代节点 < 0) return null;
                 终点编号 = 替代节点;
+                用了替代终点 = true;
             }
 
             List<int> 路径 = new List<int>();
@@ -269,6 +310,18 @@ namespace 校园GIS
             }
 
             长度 = 距离[终点编号];
+
+            if (用了替代终点)
+            {
+                IPoint 真实终点 = new PointClass();
+                真实终点.PutCoords(终点.X, 终点.Y);
+                点集.AddPoint(真实终点);
+
+                double 差X = _节点坐标[终点编号][0] - 终点.X;
+                double 差Y = _节点坐标[终点编号][1] - 终点.Y;
+                长度 += Math.Sqrt(差X * 差X + 差Y * 差Y);
+            }
+
             return (IPolyline)点集;
         }
     }
@@ -349,6 +402,52 @@ namespace 校园GIS
 
             景点数 = 景点.Count;
             return 结果;
+        }
+
+        /// <summary>按用户在地图上点选的若干地点，依次规划游览路线。</summary>
+        public static IFeatureLayer 生成自定义(IMap 地图, IFeatureLayer 道路图层,
+            List<IPoint> 地点, out int 景点数, out double 总长度)
+        {
+            景点数 = 地点 == null ? 0 : 地点.Count;
+            总长度 = 0;
+            if (地图 == null || 地点 == null || 地点.Count < 2) return null;
+
+            ISpatialReference 空间参考 = 道路图层 == null
+                ? null
+                : 地图工具.获取空间参考(道路图层.FeatureClass);
+            if (空间参考 == null) 空间参考 = 地图.SpatialReference;
+
+            道路网络 路网 = 道路图层 == null ? null : new 道路网络(道路图层);
+            IPointCollection 路线点集 = new PolylineClass();
+
+            for (int i = 1; i < 地点.Count; i++)
+            {
+                double 段长 = 0;
+                IPolyline 段 = null;
+                if (路网 != null) 段 = 路网.最短路径(地点[i - 1], 地点[i], out 段长);
+                if (段 == null)
+                {
+                    段 = 直线(地点[i - 1], 地点[i]);
+                    段长 = 段.Length;
+                }
+
+                追加顶点(路线点集, 段);
+                总长度 += 段长;
+            }
+
+            string 路线名称 = "自定义游览路线_" + DateTime.Now.ToString("HHmmss");
+            IFeatureClass 路线要素类 = 地图工具.新建Shapefile(路线名称,
+                esriGeometryType.esriGeometryPolyline, 空间参考);
+            地图工具.添加要素(路线要素类, (IGeometry)路线点集, "自定义游览路线");
+
+            string 地点名称 = "游览地点_" + DateTime.Now.ToString("HHmmss");
+            IFeatureClass 地点要素类 = 地图工具.新建Shapefile(地点名称,
+                esriGeometryType.esriGeometryPoint, 空间参考);
+            for (int i = 0; i < 地点.Count; i++)
+                地图工具.添加要素(地点要素类, 地点[i], "第 " + (i + 1) + " 站");
+
+            地图工具.添加到地图(地图, 地点要素类, "游览地点");
+            return 地图工具.添加到地图(地图, 路线要素类, "自定义游览路线");
         }
 
         private static IFeatureLayer 找图层(IMap 地图, string 名称)

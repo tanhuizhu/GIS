@@ -45,6 +45,10 @@ namespace 校园GIS
 
         private Action<double, double> _点选回调;
 
+        private List<IPoint> _多点选缓存;
+        private int _最多选点数;
+        private Action<List<IPoint>> _多点选完成;
+
         private Bitmap _地图位图;
         private IEnvelope _位图范围;
         private int _位图宽度;
@@ -102,6 +106,10 @@ namespace 校园GIS
                 IFeatureLayer 图层 = _地图.get_Layer(i) as IFeatureLayer;
                 if (图层 == null || 图层.FeatureClass == null) continue;
 
+                // 分析结果图层（缓冲区、路线、停车位等）不参与全图范围，
+                // 否则它们会把范围越撑越大，导致底图缩得很小、点不中要素
+                if (是分析结果图层(图层.Name)) continue;
+
                 IGeoDataset 数据集 = 图层.FeatureClass as IGeoDataset;
                 if (数据集 == null) continue;
 
@@ -113,8 +121,20 @@ namespace 校园GIS
             }
 
             if (合并范围 == null || 合并范围.IsEmpty) return;
-            合并范围.Expand(1.05, 1.05, true);
+            合并范围.Expand(1.02, 1.02, true);
             设置范围(合并范围);
+        }
+
+        private static bool 是分析结果图层(string 名称)
+        {
+            if (string.IsNullOrEmpty(名称)) return false;
+
+            string[] 前缀 = { "缓冲区", "叠置", "最短路径", "游览", "自定义", "非机动车", "景点" };
+            for (int i = 0; i < 前缀.Length; i++)
+            {
+                if (名称.StartsWith(前缀[i])) return true;
+            }
+            return false;
         }
 
         public void 设置范围(IEnvelope 范围)
@@ -123,7 +143,6 @@ namespace 校园GIS
             if (范围.Width <= 0 || 范围.Height <= 0) return;
 
             _当前范围 = (IEnvelope)((IClone)范围).Clone();
-            适应控件比例();
             同步视图范围();
             _位图失效 = true;
             Invalidate();
@@ -136,42 +155,24 @@ namespace 校园GIS
             Invalidate();
         }
 
+        /// <summary>把控件范围写进 ArcObjects 视图。以控件范围为准，不回读，避免视图改写范围。</summary>
         private void 同步视图范围()
         {
-            try
-            {
-                if (_视图 != null && _当前范围 != null) _视图.Extent = _当前范围;
-            }
+            if (_视图 == null || _当前范围 == null) return;
+
+            try { _视图.Extent = _当前范围; }
             catch { }
-        }
-
-        /// <summary>调整地图范围使其与控件宽高比一致，避免图形被拉伸变形。</summary>
-        private void 适应控件比例()
-        {
-            if (_当前范围 == null || _当前范围.IsEmpty) return;
-            if (Width <= 0 || Height <= 0) return;
-
-            double 控件比例 = (double)Width / Height;
-            double 地图比例 = _当前范围.Width / _当前范围.Height;
-            if (Math.Abs(控件比例 - 地图比例) < 1e-6) return;
-
-            double 中心X = (_当前范围.XMin + _当前范围.XMax) / 2.0;
-            double 中心Y = (_当前范围.YMin + _当前范围.YMax) / 2.0;
-            double 宽 = _当前范围.Width;
-            double 高 = _当前范围.Height;
-
-            if (控件比例 > 地图比例) 宽 = 高 * 控件比例;
-            else 高 = 宽 / 控件比例;
-
-            _当前范围.PutCoords(中心X - 宽 / 2, 中心Y - 高 / 2, 中心X + 宽 / 2, 中心Y + 高 / 2);
         }
 
         /// <summary>把控件像素坐标换算成地图坐标。</summary>
         public IPoint 转地图坐标(int 像素X, int 像素Y)
         {
-            if (_当前范围 == null) return null;
-            double 地图X = _当前范围.XMin + (double)像素X / Math.Max(1, Width) * _当前范围.Width;
-            double 地图Y = _当前范围.YMax - (double)像素Y / Math.Max(1, Height) * _当前范围.Height;
+            // 与渲染使用的是同一个范围对象，保证画面和坐标一一对应
+            IEnvelope 范围 = _当前范围;
+            if (范围 == null) return null;
+
+            double 地图X = 范围.XMin + (double)像素X / Math.Max(1, Width) * 范围.Width;
+            double 地图Y = 范围.YMax - (double)像素Y / Math.Max(1, Height) * 范围.Height;
             IPoint 点 = new PointClass();
             点.PutCoords(地图X, 地图Y);
             return 点;
@@ -228,6 +229,15 @@ namespace 校园GIS
             }
 
             绘制草图(e.Graphics);
+
+            if (_多点选缓存 != null && _多点选缓存.Count > 0)
+            {
+                string 提示 = "已选 " + _多点选缓存.Count + " 个地点，右键结束";
+                using (Font 字体 = new Font("微软雅黑", 10F, FontStyle.Bold))
+                {
+                    e.Graphics.DrawString(提示, 字体, Brushes.Red, 12, 12);
+                }
+            }
         }
 
         /// <summary>范围或控件尺寸变化时重新渲染一张位图，后续绘制直接贴图。</summary>
@@ -313,7 +323,7 @@ namespace 校园GIS
         protected override void OnResize(EventArgs e)
         {
             base.OnResize(e);
-            适应控件比例();
+            // 缩放窗口时保持地图范围不变，只重渲染，避免范围被改写导致点击位置偏移
             同步视图范围();
             _位图失效 = true;
             Invalidate();
@@ -349,6 +359,26 @@ namespace 校园GIS
         {
             base.OnMouseDown(e);
             Focus();
+
+            // 多点选（自定义游览路线）：左键加点，右键结束
+            if (_多点选缓存 != null)
+            {
+                if (e.Button == MouseButtons.Right)
+                {
+                    完成多点选();
+                    return;
+                }
+                if (e.Button != MouseButtons.Left) return;
+
+                IPoint 点 = 转地图坐标(e.X, e.Y);
+                if (点 != null)
+                {
+                    _多点选缓存.Add(点);
+                    Invalidate();
+                    if (_多点选缓存.Count >= _最多选点数) 完成多点选();
+                }
+                return;
+            }
 
             if (e.Button != MouseButtons.Left) return;
 
@@ -517,9 +547,45 @@ namespace 校园GIS
             _正在绘制 = false;
             _绘制完成回调 = null;
             _点选回调 = null;
+            _多点选缓存 = null;
+            _多点选完成 = null;
             _草稿点.Clear();
             Cursor = _工具 == 画布工具.无 ? Cursors.Default : Cursors.Cross;
             Invalidate();
+        }
+
+        /// <summary>
+        /// 连续点选多个地点（用于自定义游览路线），最多、个，右键结束，点满自动结束。
+        /// </summary>
+        public void 开始多点选(int 最多点数, Action<List<IPoint>> 完成)
+        {
+            取消绘制();
+            _工具 = 画布工具.无;
+            _正在绘制 = false;
+            _多点选缓存 = new List<IPoint>();
+            _最多选点数 = Math.Max(2, 最多点数);
+            _多点选完成 = 完成;
+            Cursor = Cursors.Cross;
+            Focus();
+            Invalidate();
+        }
+
+        public int 已选点数
+        {
+            get { return _多点选缓存 == null ? 0 : _多点选缓存.Count; }
+        }
+
+        private void 完成多点选()
+        {
+            List<IPoint> 点集 = _多点选缓存;
+            Action<List<IPoint>> 回调 = _多点选完成;
+
+            _多点选缓存 = null;
+            _多点选完成 = null;
+            Cursor = Cursors.Default;
+            Invalidate();
+
+            if (回调 != null) 回调(点集 ?? new List<IPoint>());
         }
 
         private void 结束绘制()

@@ -727,9 +727,9 @@ namespace 校园GIS
                             图层.FeatureClass.FeatureCount(null)));
                     }
 
-                    // 用点周围 1.5 米的小矩形做相交查询，比 IIdentify 更稳定
+                    // 用点周围 3 米的小矩形做相交查询，点到面要素内部即可命中
                     IEnvelope 范围 = new EnvelopeClass();
-                    范围.PutCoords(x - 1.5, y - 1.5, x + 1.5, y + 1.5);
+                    范围.PutCoords(x - 3, y - 3, x + 3, y + 3);
                     try
                     {
                         if (地图.SpatialReference != null) 范围.SpatialReference = 地图.SpatialReference;
@@ -1187,61 +1187,147 @@ namespace 校园GIS
 
         private void 游览路线(object sender, EventArgs e)
         {
-            try
-            {
-                IFeatureLayer 道路 = 找第一个线图层();
-                int 景点数;
-                double 总长度;
-                IFeatureLayer 结果 = 游览路线生成器.生成(_画布.地图, 道路,
-                    out 景点数, out 总长度);
+            输出("自定义游览路线：请在地图上依次点击 2~5 个地点（左键加点，右键结束）。");
+            _状态信息.Text = "依次点击想去的地点，右键结束";
 
-                if (结果 == null)
+            _画布.开始多点选(5, 点集 =>
+            {
+                if (点集 == null || 点集.Count < 2)
                 {
-                    输出("游览路线生成失败：需要至少两个景点图层，请先加载示例数据。");
+                    输出("至少需要选择两个地点才能规划路线。");
+                    _状态信息.Text = "就绪";
                     return;
                 }
 
-                刷新图层列表();
-                _画布.全图();
-                输出(string.Format("已生成校园游览路线：串联 {0} 个景点，总长约 {1:F0} 米。",
-                    景点数, 总长度));
-                _状态信息.Text = string.Format("游览路线：{0} 个景点，{1:F0} 米", 景点数, 总长度);
-            }
-            catch (Exception ex)
-            {
-                输出("游览路线生成失败：" + ex.Message);
-            }
+                try
+                {
+                    IFeatureLayer 道路 = 找第一个线图层();
+                    int 景点数;
+                    double 总长度;
+                    IFeatureLayer 结果 = 游览路线生成器.生成自定义(_画布.地图, 道路,
+                        点集, out 景点数, out 总长度);
+
+                    if (结果 == null)
+                    {
+                        输出("游览路线生成失败：缺少道路数据。");
+                        _状态信息.Text = "就绪";
+                        return;
+                    }
+
+                    刷新图层列表();
+                    _画布.全图();
+                    输出(string.Format("已按您选择的 {0} 个地点规划游览路线，总长约 {1:F0} 米。",
+                        景点数, 总长度));
+                    _状态信息.Text = string.Format("自定义游览路线：{0} 个地点，{1:F0} 米",
+                        景点数, 总长度);
+                }
+                catch (Exception ex)
+                {
+                    输出("游览路线生成失败：" + ex.Message);
+                }
+            });
         }
+
+        private IFeatureLayer _停车位图层;
 
         private void 停车位推荐(object sender, EventArgs e)
         {
+            IFeatureLayer 图层 = 找或生成停车位图层();
+            if (图层 == null) return;
+
+            输出("请在地图上点击一个地点，系统会找出离它最近的非机动车停车位。");
+            _状态信息.Text = "点击地点查找最近停车位";
+
+            _画布.开始点选((x, y) =>
+            {
+                try
+                {
+                    IFeatureClass 要素类 = 图层.FeatureClass;
+                    IFeatureCursor 游标 = 要素类.Search(null, false);
+                    IFeature 要素;
+                    IFeature 最近要素 = null;
+                    double 最近距离 = double.MaxValue;
+                    IPoint 最近点 = null;
+
+                    while ((要素 = 游标.NextFeature()) != null)
+                    {
+                        IPoint 停车点 = 要素.ShapeCopy as IPoint;
+                        if (停车点 == null) continue;
+
+                        double 差X = 停车点.X - x;
+                        double 差Y = 停车点.Y - y;
+                        double 距离 = Math.Sqrt(差X * 差X + 差Y * 差Y);
+
+                        if (距离 < 最近距离)
+                        {
+                            最近距离 = 距离;
+                            最近要素 = 要素;
+                            最近点 = 停车点;
+                        }
+                    }
+                    System.Runtime.InteropServices.Marshal.ReleaseComObject(游标);
+
+                    if (最近要素 == null)
+                    {
+                        输出("没有可用的停车位数据。");
+                        return;
+                    }
+
+                    IFeatureSelection 选择 = 图层 as IFeatureSelection;
+                    if (选择 != null)
+                    {
+                        选择.Clear();
+                        选择.Add(最近要素);
+                    }
+                    _画布.刷新地图();
+
+                    输出(string.Format("离您点击位置最近的非机动车停车位：距离约 {0:F1} 米，位置 (X={1:F0}, Y={2:F0})，已在地图上高亮。",
+                        最近距离, 最近点.X, 最近点.Y));
+                    _状态信息.Text = string.Format("最近停车位：{0:F1} 米", 最近距离);
+                }
+                catch (Exception ex)
+                {
+                    输出("查询停车位失败：" + ex.Message);
+                }
+            });
+        }
+
+        /// <summary>停车位图层已在就复用，否则沿道路现场布设一份。</summary>
+        private IFeatureLayer 找或生成停车位图层()
+        {
+            if (_停车位图层 != null && _停车位图层.FeatureClass != null) return _停车位图层;
+
+            IMap 地图 = _画布.地图;
+            for (int i = 0; i < 地图.LayerCount; i++)
+            {
+                IFeatureLayer 已有 = 地图.get_Layer(i) as IFeatureLayer;
+                if (已有 != null && 已有.Name == "非机动车停车位")
+                {
+                    _停车位图层 = 已有;
+                    return 已有;
+                }
+            }
+
             IFeatureLayer 道路 = 找第一个线图层();
             if (道路 == null)
             {
-                输出("没有找到道路线图层，无法推荐停车位。");
-                return;
+                输出("没有道路数据，无法布设停车位。");
+                return null;
             }
 
-            try
+            输出("首次使用，正在沿道路布设停车位，请稍候……");
+            int 数量;
+            IFeatureLayer 结果 = 停车位推荐器.生成(地图, 道路, 40, 6, out 数量);
+            if (结果 == null)
             {
-                输出("正在沿道路计算非机动车停车位，请稍候……");
-                int 点位数;
-                IFeatureLayer 结果 = 停车位推荐器.生成(_画布.地图, 道路, 40, 6, out 点位数);
-                if (结果 == null)
-                {
-                    输出("道路两侧没有找到合适的停车位位置。");
-                    return;
-                }
+                输出("道路两侧没有找到合适的停车位位置。");
+                return null;
+            }
 
-                刷新图层列表();
-                _画布.刷新地图();
-                输出("已推荐 " + 点位数 + " 个非机动车停车位（沿道路每 40 米一个，避开建筑和绿地）。");
-                _状态信息.Text = "非机动车停车位：" + 点位数 + " 个";
-            }
-            catch (Exception ex)
-            {
-                输出("停车位推荐失败：" + ex.Message);
-            }
+            _停车位图层 = 结果;
+            刷新图层列表();
+            输出("已沿道路布设 " + 数量 + " 个非机动车停车位。");
+            return 结果;
         }
 
         // ================================================================ 地图制图
