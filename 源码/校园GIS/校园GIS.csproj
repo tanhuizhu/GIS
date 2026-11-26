@@ -93,6 +93,7 @@
     <Compile Include="对话框.cs" />
     <Compile Include="空间分析.cs" />
     <Compile Include="主窗口.分析功能.cs" />
+    <Compile Include="分析参数窗口.cs" />
     <Compile Include="主窗口.cs">
       <SubType>Form</SubType>
     </Compile>
