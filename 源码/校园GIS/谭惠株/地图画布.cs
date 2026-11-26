@@ -51,6 +51,10 @@ namespace 校园GIS
 
         private Bitmap _地图位图;
         private IEnvelope _位图范围;
+        /// <summary>最近一次渲染时 ArcObjects 实际使用的范围，点击换算以它为准。</summary>
+        private IEnvelope _渲染范围;
+        /// <summary>系统界面缩放倍数缓存（96 DPI 为 1.0）。</summary>
+        private double _界面缩放倍数;
         private int _位图宽度;
         private int _位图高度;
         private string _渲染错误;
@@ -142,10 +146,38 @@ namespace 校园GIS
             if (范围 == null || 范围.IsEmpty) return;
             if (范围.Width <= 0 || 范围.Height <= 0) return;
 
-            _当前范围 = (IEnvelope)((IClone)范围).Clone();
+            _当前范围 = 适配纵横比((IEnvelope)((IClone)范围).Clone());
             同步视图范围();
             _位图失效 = true;
             Invalidate();
+        }
+
+        /// <summary>
+        /// 把范围补齐成与控件纵横比一致。渲染时 ArcObjects 会按窗口比例调整范围，
+        /// 若这里不先补齐，画面上看到的位置和“转地图坐标”算出的位置就会错开。
+        /// </summary>
+        private IEnvelope 适配纵横比(IEnvelope 范围)
+        {
+            if (范围 == null || Width <= 0 || Height <= 0) return 范围;
+
+            double 控件比 = (double)Width / Height;
+            double 范围比 = 范围.Width / 范围.Height;
+            if (范围比 <= 0) return 范围;
+
+            double 中心X = (范围.XMin + 范围.XMax) / 2;
+            double 中心Y = (范围.YMin + 范围.YMax) / 2;
+
+            if (范围比 > 控件比)
+            {
+                double 新高 = 范围.Width / 控件比;
+                范围.PutCoords(范围.XMin, 中心Y - 新高 / 2, 范围.XMax, 中心Y + 新高 / 2);
+            }
+            else
+            {
+                double 新宽 = 范围.Height * 控件比;
+                范围.PutCoords(中心X - 新宽 / 2, 范围.YMin, 中心X + 新宽 / 2, 范围.YMax);
+            }
+            return 范围;
         }
 
         /// <summary>图层可见性、选择集、要素、符号等发生变化后，强制重新渲染地图。</summary>
@@ -167,8 +199,14 @@ namespace 校园GIS
         /// <summary>把控件像素坐标换算成地图坐标。</summary>
         public IPoint 转地图坐标(int 像素X, int 像素Y)
         {
-            // 与渲染使用的是同一个范围对象，保证画面和坐标一一对应
-            IEnvelope 范围 = _当前范围;
+            // 以最近一次渲染实际使用的范围为准，保证画面上的位置和算出的坐标严格对应
+            IEnvelope 范围 = (_渲染范围 != null && !_渲染范围.IsEmpty) ? _渲染范围 : _当前范围;
+
+            // 系统开启 125%/150% 缩放时，ArcObjects 按物理 DPI 渲染、而鼠标坐标是 96 DPI 虚拟像素，
+            // 两者差一个缩放倍数，必须折算，否则点击位置会整体偏移。
+            double 缩放 = 界面缩放();
+            像素X = (int)Math.Round(像素X / 缩放);
+            像素Y = (int)Math.Round(像素Y / 缩放);
             if (范围 == null) return null;
 
             double 地图X = 范围.XMin + (double)像素X / Math.Max(1, Width) * 范围.Width;
@@ -176,6 +214,32 @@ namespace 校园GIS
             IPoint 点 = new PointClass();
             点.PutCoords(地图X, 地图Y);
             return 点;
+        }
+
+        /// <summary>系统界面缩放倍数（96 DPI 为 1.0）。进程本身已感知 DPI 时返回 1。</summary>
+        private double 界面缩放()
+        {
+            if (_界面缩放倍数 > 0) return _界面缩放倍数;
+
+            _界面缩放倍数 = 1.0;
+            try
+            {
+                if (DeviceDpi == 96)
+                {
+                    using (Microsoft.Win32.RegistryKey 键 =
+                        Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Control Panel\Desktop\WindowMetrics"))
+                    {
+                        object 值 = 键 == null ? null : 键.GetValue("AppliedDPI");
+                        if (值 != null)
+                        {
+                            double 倍数 = Convert.ToDouble(值) / 96.0;
+                            if (倍数 >= 1.0) _界面缩放倍数 = 倍数;
+                        }
+                    }
+                }
+            }
+            catch { }
+            return _界面缩放倍数;
         }
 
         /// <summary>把控件尺寸、位图尺寸和当前范围拼成一行文字，用于排查坐标换算问题。</summary>
@@ -197,8 +261,12 @@ namespace 校园GIS
             catch { }
 
             string 位图 = _地图位图 == null ? "无" : _地图位图.Width + "x" + _地图位图.Height;
-            return "控件 " + Width + "x" + Height + "，位图 " + 位图 +
-                   "，绘制范围 " + 范围 + "，视图范围 " + 视图范围;
+            string 渲染 = (_渲染范围 == null || _渲染范围.IsEmpty)
+                ? "无"
+                : string.Format("X {0:F2} ~ {1:F2}, Y {2:F2} ~ {3:F2}",
+                    _渲染范围.XMin, _渲染范围.XMax, _渲染范围.YMin, _渲染范围.YMax);
+            return "控件 " + Width + "x" + Height + "，位图 " + 位图 + "，DPI " + DeviceDpi +
+                   "，缩放 " + 界面缩放().ToString("F2") + "，绘制范围 " + 范围 + "，渲染范围 " + 渲染 + "，视图范围 " + 视图范围;
         }
 
         // ---------------------------------------------------------------- 绘制
@@ -217,7 +285,12 @@ namespace 校园GIS
 
             if (_地图位图 != null)
             {
-                e.Graphics.DrawImageUnscaled(_地图位图, 0, 0);
+                // 必须按控件实际矩形绘制：用 DrawImageUnscaled 时，高 DPI 缩放下位图会被放大，
+                // 画面上的要素位置就和“转地图坐标”算出的位置错开。
+                e.Graphics.DrawImage(_地图位图,
+                    new Rectangle(0, 0, Width, Height),
+                    new Rectangle(0, 0, _地图位图.Width, _地图位图.Height),
+                    GraphicsUnit.Pixel);
             }
             else if (!string.IsNullOrEmpty(_渲染错误))
             {
@@ -273,6 +346,17 @@ namespace 校园GIS
                 _视图.Output(设备句柄, 96, ref 矩形, _当前范围, null);
                 导出器.FinishExporting();
                 导出器.Cleanup();
+
+                // 记录 ArcObjects 这次真正使用的范围：它可能按位图纵横比做过调整，
+                // 点击换算必须用这个范围，否则点和要素会错开。
+                try
+                {
+                    if (_视图.Extent != null && !_视图.Extent.IsEmpty)
+                        _渲染范围 = (IEnvelope)((IClone)_视图.Extent).Clone();
+                }
+                catch { }
+                if (_渲染范围 == null || _渲染范围.IsEmpty)
+                    _渲染范围 = (IEnvelope)((IClone)_当前范围).Clone();
 
                 using (Bitmap 读入 = new Bitmap(临时文件))
                 {

@@ -119,11 +119,12 @@ namespace 校园GIS
             if (_路径起点 == null)
             {
                 _路径起点 = 建立点(x, y);
-                输出("起点已设置，请点击终点。");
+                输出(string.Format("起点已设置：X={0:F1} Y={1:F1}，请点击终点。", x, y));
                 _画布.开始点选(路径点被选中);
             }
             else
             {
+                输出(string.Format("终点：X={0:F1} Y={1:F1}", x, y));
                 计算并显示路径(建立点(x, y));
             }
         }
@@ -135,30 +136,53 @@ namespace 校园GIS
 
             try
             {
-                道路网络 路网 = new 道路网络(图层);
-                double 长度;
-                IPolyline 路径 = 路网.最短路径(_路径起点, 终点, out 长度);
-
-                if (路径 == null)
+                道路网络 路网 = new 道路网络(图层, _画布.地图);
+                输出(string.Format("道路网络已构建：{0} 个节点，其中并入了 {1} 个辅助线图层。", 路网.节点数, 路网.辅助图层数));
+                道路网络.路径结果 结果 = 路网.求路径(_路径起点, 终点);
+                if (结果.路径 == null)
                 {
-                    输出("未找到连通路径（起点或终点可能不在道路网络上）。");
+                    输出("最短路径计算失败：" + 结果.说明);
                     return;
                 }
 
                 ISpatialReference 空间参考 = 地图工具.获取空间参考(图层.FeatureClass);
-                if (空间参考 != null) 路径.SpatialReference = 空间参考;
+                if (空间参考 != null)
+                {
+                    结果.路径.SpatialReference = 空间参考;
+                    结果.吸附起点.SpatialReference = 空间参考;
+                    结果.吸附终点.SpatialReference = 空间参考;
+                }
 
-                string 结果名称 = "路径_" + DateTime.Now.ToString("HHmmss");
-                IFeatureClass 结果要素类 = 地图工具.新建Shapefile(结果名称,
+                // 只保留最新一次的路径结果，避免图层越堆越多
+                移除旧的路径图层();
+
+                string 时间 = DateTime.Now.ToString("HHmmss");
+
+                IFeatureClass 线要素类 = 地图工具.新建Shapefile("路径_" + 时间,
                     esriGeometryType.esriGeometryPolyline, 空间参考);
-                地图工具.添加要素(结果要素类, 路径, "最短路径");
+                地图工具.添加要素(线要素类, 结果.路径,
+                    string.Format("最短路径 {0:F1} 米", 结果.长度));
+                IFeatureLayer 线图层 = 地图工具.添加到地图(_画布.地图, 线要素类, "最短路径结果");
+                设置路径符号(线图层);
 
-                地图工具.添加到地图(_画布.地图, 结果要素类, "最短路径结果");
+                IFeatureClass 起点要素类 = 地图工具.新建Shapefile("起点_" + 时间,
+                    esriGeometryType.esriGeometryPoint, 空间参考);
+                地图工具.添加要素(起点要素类, 结果.吸附起点, "起点");
+                IFeatureLayer 起点图层 = 地图工具.添加到地图(_画布.地图, 起点要素类, "路径起点");
+                设置点符号(起点图层, 30, 160, 70);
+
+                IFeatureClass 终点要素类 = 地图工具.新建Shapefile("终点_" + 时间,
+                    esriGeometryType.esriGeometryPoint, 空间参考);
+                地图工具.添加要素(终点要素类, 结果.吸附终点, "终点");
+                IFeatureLayer 终点图层 = 地图工具.添加到地图(_画布.地图, 终点要素类, "路径终点");
+                设置点符号(终点图层, 220, 40, 40);
+
                 刷新图层列表();
                 _画布.刷新地图();
 
-                输出(string.Format("最短路径计算完成，长度 {0:F2} 米。", 长度));
-                _状态信息.Text = string.Format("最短路径 {0:F2} 米", 长度);
+                输出(string.Format("最短路径计算完成，长度 {0:F2} 米。", 结果.长度));
+                输出(结果.说明);
+                _状态信息.Text = string.Format("最短路径 {0:F2} 米", 结果.长度);
             }
             catch (Exception ex)
             {
@@ -169,6 +193,62 @@ namespace 校园GIS
                 _路径起点 = null;
                 _路径图层 = null;
             }
+        }
+
+        /// <summary>每次分析前清掉上一次的路径图层，保持图层列表干净。</summary>
+        private void 移除旧的路径图层()
+        {
+            IMap 地图 = _画布.地图;
+            for (int i = 地图.LayerCount - 1; i >= 0; i--)
+            {
+                ILayer 一层 = 地图.get_Layer(i);
+                if (一层 == null) continue;
+                if (一层.Name == "最短路径结果" || 一层.Name == "路径起点" || 一层.Name == "路径终点")
+                    地图.DeleteLayer(一层);
+            }
+        }
+
+        /// <summary>路径用加粗红色线显示，确保在任何底色上都醒目。</summary>
+        private static void 设置路径符号(IFeatureLayer 图层)
+        {
+            IGeoFeatureLayer 可渲染 = 图层 as IGeoFeatureLayer;
+            if (可渲染 == null) return;
+
+            ISimpleLineSymbol 符号 = new SimpleLineSymbolClass();
+            符号.Style = esriSimpleLineStyle.esriSLSSolid;
+            符号.Width = 3.5;
+            符号.Color = 取颜色(230, 30, 30);
+
+            ISimpleRenderer 渲染器 = new SimpleRendererClass();
+            渲染器.Symbol = (ISymbol)符号;
+            可渲染.Renderer = (IFeatureRenderer)渲染器;
+        }
+
+        /// <summary>起终点用带白边的圆点标记。</summary>
+        private static void 设置点符号(IFeatureLayer 图层, int 红, int 绿, int 蓝)
+        {
+            IGeoFeatureLayer 可渲染 = 图层 as IGeoFeatureLayer;
+            if (可渲染 == null) return;
+
+            ISimpleMarkerSymbol 符号 = new SimpleMarkerSymbolClass();
+            符号.Style = esriSimpleMarkerStyle.esriSMSCircle;
+            符号.Size = 10;
+            符号.Color = 取颜色(红, 绿, 蓝);
+            符号.Outline = true;
+            符号.OutlineColor = 取颜色(255, 255, 255);
+
+            ISimpleRenderer 渲染器 = new SimpleRendererClass();
+            渲染器.Symbol = (ISymbol)符号;
+            可渲染.Renderer = (IFeatureRenderer)渲染器;
+        }
+
+        private static IColor 取颜色(int 红, int 绿, int 蓝)
+        {
+            IRgbColor 色 = new RgbColorClass();
+            色.Red = 红;
+            色.Green = 绿;
+            色.Blue = 蓝;
+            return 色;
         }
 
         // ================================================================ 创新功能

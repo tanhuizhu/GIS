@@ -344,7 +344,7 @@ namespace 校园GIS
                 return;
             }
 
-            string[] 图层名列表 = { "LD", "DL", "CC", "JXQ", "QTJZ", "TSG", "ST", "SSQ", "YWS", "XZLX" };
+            string[] 图层名列表 = { "LD", "DL", "CC", "JXQ", "QTJZ", "TSG", "ST", "YWS", "XZLX" };
             int 已加载 = 0;
             foreach (string 名称 in 图层名列表)
             {
@@ -356,9 +356,26 @@ namespace 校园GIS
                 }
             }
 
+            // 数据目录里还有大量未列入上面的图层（水系、停车场、出入口等），一并加载，便于查看数据完整度。
+            // 下面几个与母图层几何高度重合，只加载母图层，避免叠在一起看不清。
+            string[] 重复图层 = { "QJGYX", "STX", "JXQX", "SSQ", "LM" };
+            int 已跳过 = 0;
+            string[] 全部文件 = Directory.GetFiles(目录, "*.shp");
+            System.Array.Sort(全部文件, StringComparer.OrdinalIgnoreCase);
+            foreach (string 路径 in 全部文件)
+            {
+                string 名称 = Path.GetFileNameWithoutExtension(路径);
+                if (System.Array.IndexOf(图层名列表, 名称) >= 0) continue;
+                if (System.Array.IndexOf(重复图层, 名称) >= 0) { 已跳过++; continue; }
+                if (!File.Exists(Path.ChangeExtension(路径, ".dbf"))) { 已跳过++; continue; }
+
+                添加图层文件(路径);
+                已加载++;
+            }
+
             刷新图层列表();
             _画布.全图();
-            输出("已从 " + 目录 + " 加载 " + 已加载 + " 个示例图层。");
+            输出("已从 " + 目录 + " 加载 " + 已加载 + " 个图层，跳过 " + 已跳过 + " 个重复或空图层。");
         }
 
         private void 添加图层文件(string 路径)
@@ -375,6 +392,7 @@ namespace 校园GIS
                 IFeatureLayer 图层 = new FeatureLayerClass();
                 图层.FeatureClass = 要素类;
                 图层.Name = 取中文图层名(名称);
+                图层.Selectable = true;   // 不开这个，空间查询/选择要素会直接跳过该图层
 
                 IMap 地图 = _画布.地图;
 
@@ -702,6 +720,7 @@ namespace 校园GIS
                 x, y, _画布.诊断信息()));
 
             输出(string.Format("识别位置：X={0:F1}  Y={1:F1}", x, y));
+            输出(_画布.诊断信息());
             IEnvelope 视图范围 = _画布.当前范围;
             if (视图范围 != null)
                 输出(string.Format("当前视图范围：X {0:F0} ~ {1:F0}，Y {2:F0} ~ {3:F0}",
