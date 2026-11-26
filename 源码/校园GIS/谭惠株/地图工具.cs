@@ -29,7 +29,8 @@ namespace 校园GIS
                 string 目录 = AppDomain.CurrentDomain.BaseDirectory.TrimEnd('\\');
                 for (int i = 0; i < 10 && !string.IsNullOrEmpty(目录); i++)
                 {
-                    if (Directory.Exists(Path.Combine(目录, "数据")))
+                    if (Directory.Exists(Path.Combine(目录, "数据_南邮")) ||
+                        Directory.Exists(Path.Combine(目录, "数据")))
                     {
                         _根目录 = 目录;
                         return _根目录;
@@ -45,10 +46,15 @@ namespace 校园GIS
             }
         }
 
-        /// <summary>存放原始 shapefile 数据的目录。</summary>
+        /// <summary>存放原始 shapefile 数据的目录，优先使用南邮校园数据。</summary>
         public static string 数据目录
         {
-            get { return Path.Combine(根目录, "数据"); }
+            get
+            {
+                string 南邮目录 = Path.Combine(根目录, "数据_南邮");
+                if (Directory.Exists(南邮目录)) return 南邮目录;
+                return Path.Combine(根目录, "数据");
+            }
         }
 
         /// <summary>存放分析结果、导出图片的目录，不存在会自动创建。</summary>

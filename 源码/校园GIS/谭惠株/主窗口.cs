@@ -313,26 +313,21 @@ namespace 校园GIS
 
         // ================================================================ 图层管理
 
-        /// <summary>数据文件名（英文缩写）对应的中文图层名。</summary>
-        private static readonly Dictionary<string, string> 图层中文名表 =
-            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-            {
-                { "LD", "绿地" },
-                { "DL", "道路" },
-                { "CC", "操场" },
-                { "JXQ", "教学区" },
-                { "QTJZ", "其他建筑" },
-                { "TSG", "图书馆" },
-                { "ST", "水体" },
-                { "SSQ", "宿舍区" },
-                { "YWS", "医务室" },
-                { "XZLX", "行政区" }
-            };
-
-        private static string 取中文图层名(string 英文名)
+        /// <summary>示例数据目录里的图层加载顺序（从下往上叠加）。文件名本身就是中文。</summary>
+        private static readonly string[] 示例图层列表 =
         {
-            string 中文名;
-            return 图层中文名表.TryGetValue(英文名, out 中文名) ? 中文名 : 英文名;
+            "植被", "草丛", "裸地", "山地",
+            "水域", "中博湖", "栗子山", "鼎山",
+            "道路", "大路", "小路",
+            "广场", "运动场", "建筑",
+            "北操场", "南操场", "北篮球场", "南篮球场",
+            "战邮广场", "青春广场",
+            "校医室", "公交车站", "许愿树", "树"
+        };
+
+        private static string 取中文图层名(string 名称)
+        {
+            return 名称;
         }
 
         private void 加载示例数据()
@@ -344,9 +339,8 @@ namespace 校园GIS
                 return;
             }
 
-            string[] 图层名列表 = { "LD", "DL", "CC", "JXQ", "QTJZ", "TSG", "ST", "SSQ", "YWS", "XZLX" };
             int 已加载 = 0;
-            foreach (string 名称 in 图层名列表)
+            foreach (string 名称 in 示例图层列表)
             {
                 string 路径 = Path.Combine(目录, 名称 + ".shp");
                 if (File.Exists(路径))
@@ -1210,8 +1204,8 @@ namespace 校园GIS
             }
             记("[符号] 带渲染器的图层数 = " + 有渲染器 + (有渲染器 == 地图.LayerCount ? " 通过" : " 失败"));
 
-            IFeatureLayer 图书馆 = 查找图层("图书馆");
-            IFeatureLayer 绿地 = 查找图层("绿地");
+            IFeatureLayer 图书馆 = 查找图层("建筑");
+            IFeatureLayer 绿地 = 查找图层("植被");
             IFeatureLayer 道路 = 找第一个线图层();
 
             // 点击识别

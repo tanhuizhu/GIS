@@ -41,6 +41,9 @@ Thumbs.db
 数据_备份/
 *.zip
 
+# 原始素材（含 100MB 影像，不上传）
+南邮地图/
+
 # ArcGIS 运行时产生的锁文件
 *.sr.lock
 *.lock
