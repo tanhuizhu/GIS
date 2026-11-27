@@ -943,7 +943,8 @@ namespace 校园GIS
     {
         private static readonly string[] 避让图层名称 =
         {
-            "其他建筑", "图书馆", "行政区", "宿舍区", "教学区", "医务室", "绿地", "水体"
+            "建筑", "植被", "草丛", "裸地", "水域", "中博湖",
+            "运动场", "广场", "山地", "栗子山", "鼎山"
         };
 
         public static IFeatureLayer 生成(IMap 地图, IFeatureLayer 道路图层,

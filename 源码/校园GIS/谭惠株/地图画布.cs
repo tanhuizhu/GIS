@@ -360,12 +360,13 @@ namespace 校园GIS
 
                 using (Bitmap 读入 = new Bitmap(临时文件))
                 {
-                    Bitmap 副本 = new Bitmap(读入.Width, 读入.Height,
+                    Bitmap 副本 = new Bitmap(Width, Height,
                         System.Drawing.Imaging.PixelFormat.Format24bppRgb);
                     using (Graphics g = Graphics.FromImage(副本))
                     {
                         g.Clear(Color.White);
-                        g.DrawImageUnscaled(读入, 0, 0);
+                        g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+                        g.DrawImage(读入, 0, 0, Width, Height);
                     }
                     if (_地图位图 != null) _地图位图.Dispose();
                     _地图位图 = 副本;
