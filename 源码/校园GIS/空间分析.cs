@@ -24,6 +24,11 @@ namespace 校园GIS
             IFeatureClass 结果要素类 = 地图工具.新建Shapefile(结果名称,
                 esriGeometryType.esriGeometryPolygon, 空间参考);
 
+            // 读取源图层的名称字段索引（如果有的话）
+            int 名称字段序号 = 源要素类.FindField("NAME");
+            if (名称字段序号 < 0) 名称字段序号 = 源要素类.FindField("名称");
+            if (名称字段序号 < 0) 名称字段序号 = 源要素类.FindField("Name");
+
             IFeatureCursor 游标 = 源要素类.Search(null, false);
             IFeature 要素;
             while ((要素 = 游标.NextFeature()) != null)
@@ -46,8 +51,17 @@ namespace 校园GIS
 
                 try { ((ITopologicalOperator)缓冲图形).Simplify(); } catch { }
 
+                // 读取源要素名称，用于结果命名
+                string 要素名称 = "要素" + 要素.OID;
+                if (名称字段序号 >= 0)
+                {
+                    object 名称值 = 要素.get_Value(名称字段序号);
+                    if (名称值 != null && !string.IsNullOrWhiteSpace(名称值.ToString()))
+                        要素名称 = 名称值.ToString();
+                }
+
                 地图工具.添加要素(结果要素类, 缓冲图形,
-                    "缓冲区 " + 距离.ToString("0.##") + " 米");
+                    要素名称 + " 缓冲区 " + 距离.ToString("0.##") + " 米");
                 要素数++;
             }
             System.Runtime.InteropServices.Marshal.ReleaseComObject(游标);

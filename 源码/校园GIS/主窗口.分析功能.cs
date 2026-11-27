@@ -40,7 +40,26 @@ namespace 校园GIS
 
                     刷新图层列表();
                     _画布.全图();
-                    输出("缓冲区分析完成，共生成 " + 要素数 + " 个缓冲区要素。");
+                    输出("缓冲区分析完成，图层名：" + 结果.Name + "，共生成 " + 要素数 + " 个缓冲区要素。");
+
+                    // 列出前 10 个缓冲区要素的名称
+                    IFeatureClass 结果要素类 = 结果.FeatureClass;
+                    int 名称字段 = 结果要素类.FindField("NAME");
+                    if (名称字段 >= 0)
+                    {
+                        IFeatureCursor 游标 = 结果要素类.Search(null, false);
+                        IFeature 要素;
+                        int 计数 = 0;
+                        while ((要素 = 游标.NextFeature()) != null && 计数 < 10)
+                        {
+                            object 名称值 = 要素.get_Value(名称字段);
+                            if (名称值 != null)
+                                输出("  - " + 名称值.ToString());
+                            计数++;
+                        }
+                        if (要素数 > 10) 输出("  ... 等共 " + 要素数 + " 个");
+                        System.Runtime.InteropServices.Marshal.ReleaseComObject(游标);
+                    }
                 }
                 catch (Exception ex)
                 {
